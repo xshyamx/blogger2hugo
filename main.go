@@ -8,42 +8,42 @@ import (
 	"os"
 	"time"
 	"log"
+	"text/template"
 )
 
 type Feed struct {
 	XMLName xml.Name `xml:"feed"`
-	Entries []Entry `xml:"entry"`
+	Entries []FeedEntry `xml:"entry"`
+}
+type Entry struct {
+	PubDate time.Time
+	Title string
+	Content string
+	Tags []string
+	Draft bool
 }
 
-type Entry struct {
-	PubDate XMLTime `xml:"published"`
-	Category struct {
-		Kind Kind `xml:"term,attr"`
-	} `xml:"category"`
+type FeedEntry struct {
+	PubDate time.Time `xml:"published"`
+	Categories []Category  `xml:"category"`
 	Title string `xml:"title"`
 	Content string `xml:"content"`
+	Control Control `xml:"control"`
+}
+
+type Control struct {
+	XMLName xml.Name
+	Draft string `xml:"draft"`
+}
+
+type Category struct {
+	Scheme string `xml:"scheme,attr"`
+	Term string `xml:"term,attr"`
 }
 
 type XMLTime struct {
 	time.Time
 }
-
-type Kind struct {
-	string
-}
-
-func (k *Kind) UnmarshalXMLAttr(attr xml.Attr) error {
-  val := attr.Value
-	i := strings.LastIndex(val, "#")
-	if i != -1 {
-		fmt.Println("UnmarshalXMLAttr", val, val[i+1:])
-		*k = Kind{val[i+1:]}
-		fmt.Println("kind", *k)
-	}
-	return nil
-}
-
-
 
 func (t *XMLTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var v string
@@ -57,7 +57,40 @@ func (t *XMLTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	return nil
 }
 
+func fromFeed(feed Feed) []Entry {
+	var entries []Entry
+	const TAG_SCHEME = "http://www.blogger.com/atom/ns#"
+	const KIND_SCHEME = "http://schemas.google.com/g/2005#kind"
+	for _, entry := range feed.Entries {
+		var tags []string
+		found := false
+		for _, cat :=  range entry.Categories {
+			if cat.Scheme == TAG_SCHEME {
+				tags = append(tags, cat.Term)
+			} else if cat.Scheme == KIND_SCHEME && strings.HasSuffix(cat.Term, "kind#post") {
+				found = true
+			}
+		}
+		if found {
+			entries = append(entries, Entry{
+				PubDate: entry.PubDate,
+				Title: entry.Title,
+				Content: entry.Content,
+				Tags: tags,
+				Draft: entry.Control.Draft == "yes",
+			})
+		}
+	}
+	return entries
+}
 
+const EntryTemplate = `----
+title: {{.Title}}
+author: shyam
+date: {{.PubDate}}
+tags: [{{range .Tags}} "{{.}}",{{end}}]
+----
+{{.Content}}` 
 func main() {
 	f, err := os.Open("out.xml")
 	if err != nil {
@@ -71,7 +104,24 @@ func main() {
 	var feed Feed
 	err = xml.Unmarshal(buf, &feed)
 	//fmt.Printf("%+v", feed)
-	for _, entry := range feed.Entries {
-		fmt.Printf("%s %s\n", entry.Title, entry.Category.Kind)
+	entries := fromFeed(feed)
+	fmt.Printf("Found %d posts\n", len(entries))
+	err = os.MkdirAll("posts", os.ModeDir | 0755)
+	if err != nil {
+		log.Fatal("Failed to create directory", err)
 	}
+	tmpl := template.Must(template.New("entry").Parse(EntryTemplate))
+	for _, entry := range entries {
+		out, err := os.Create("posts/" + strings.ReplaceAll(strings.ToLower(entry.Title), " ", "-") + ".md")
+		if err != nil {
+			log.Fatal("Failed to create file", err)
+		}
+		defer out.Close()
+		err = tmpl.Execute(out, entry)
+		if err != nil {
+			log.Println("Failed to merge template", err)
+		}
+		fmt.Printf("%s %s %t\n", entry.Title, entry.Tags, entry.Draft)
+	}
+	
 }
