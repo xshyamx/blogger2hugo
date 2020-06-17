@@ -1,0 +1,6 @@
+.*
+!.gitignore
+/posts
+/content
+/static
+/img
