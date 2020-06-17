@@ -1,6 +1,6 @@
 # Blogger Backup to Markdown #
 
-A simple CLI utility to convert the [blogger backup][blogger-backup] generated xml file into a list of markdown files with some basic front matter. Only posts are exported everything else is ignored
+A simple CLI utility to convert the [blogger backup][blogger-backup] generated xml file into a list of markdown files with some basic front matter. Only posts are exported everything else is ignored. No processing of the post content is done.
 
 
 ## Build & Run ##
