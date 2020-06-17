@@ -4,41 +4,42 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io/ioutil"
-	"strings"
-	"os"
-	"time"
 	"log"
+	"os"
+	"regexp"
+	"strings"
 	"text/template"
+	"time"
 )
 
 type Feed struct {
-	XMLName xml.Name `xml:"feed"`
+	XMLName xml.Name    `xml:"feed"`
 	Entries []FeedEntry `xml:"entry"`
 }
 type Entry struct {
 	PubDate time.Time
-	Title string
+	Title   string
 	Content string
-	Tags []string
-	Draft bool
+	Tags    []string
+	Draft   bool
 }
 
 type FeedEntry struct {
-	PubDate time.Time `xml:"published"`
-	Categories []Category  `xml:"category"`
-	Title string `xml:"title"`
-	Content string `xml:"content"`
-	Control Control `xml:"control"`
+	PubDate    time.Time  `xml:"published"`
+	Categories []Category `xml:"category"`
+	Title      string     `xml:"title"`
+	Content    string     `xml:"content"`
+	Control    Control    `xml:"control"`
 }
 
 type Control struct {
 	XMLName xml.Name
-	Draft string `xml:"draft"`
+	Draft   string `xml:"draft"`
 }
 
 type Category struct {
 	Scheme string `xml:"scheme,attr"`
-	Term string `xml:"term,attr"`
+	Term   string `xml:"term,attr"`
 }
 
 type XMLTime struct {
@@ -64,7 +65,7 @@ func fromFeed(feed Feed) []Entry {
 	for _, entry := range feed.Entries {
 		var tags []string
 		found := false
-		for _, cat :=  range entry.Categories {
+		for _, cat := range entry.Categories {
 			if cat.Scheme == TAG_SCHEME {
 				tags = append(tags, cat.Term)
 			} else if cat.Scheme == KIND_SCHEME && strings.HasSuffix(cat.Term, "kind#post") {
@@ -74,23 +75,29 @@ func fromFeed(feed Feed) []Entry {
 		if found {
 			entries = append(entries, Entry{
 				PubDate: entry.PubDate,
-				Title: entry.Title,
+				Title:   entry.Title,
 				Content: entry.Content,
-				Tags: tags,
-				Draft: entry.Control.Draft == "yes",
+				Tags:    tags,
+				Draft:   entry.Control.Draft == "yes",
 			})
 		}
 	}
 	return entries
 }
 
-const EntryTemplate = `----
-title: {{.Title}}
-author: shyam
-date: {{.PubDate}}
-tags: [{{range .Tags}} "{{.}}",{{end}}]
-----
-{{.Content}}` 
+const EntryTemplate = `---
+title: "{{.Title}}"
+date: {{ date .PubDate }}
+draft: true
+tags: [ {{range $i, $t := .Tags}}{{if $i}}, {{end}}"{{.}}"{{end}} ]
+---
+{{.Content}}`
+
+func sanitize(s string) string {
+	re := regexp.MustCompile("[^A-Za-z0-9-]+")
+	base := strings.ReplaceAll(strings.ToLower(s), " ", "-")
+	return re.ReplaceAllLiteralString(base, "")
+}
 func main() {
 	f, err := os.Open("out.xml")
 	if err != nil {
@@ -106,13 +113,19 @@ func main() {
 	//fmt.Printf("%+v", feed)
 	entries := fromFeed(feed)
 	fmt.Printf("Found %d posts\n", len(entries))
-	err = os.MkdirAll("posts", os.ModeDir | 0755)
+	err = os.MkdirAll("posts", os.ModeDir|0755)
+
 	if err != nil {
 		log.Fatal("Failed to create directory", err)
 	}
-	tmpl := template.Must(template.New("entry").Parse(EntryTemplate))
+	funcMap := template.FuncMap{
+		"date": func(t time.Time) string {
+			return t.Format(time.RFC3339)
+		},
+	}
+	tmpl := template.Must(template.New("entry").Funcs(funcMap).Parse(EntryTemplate))
 	for _, entry := range entries {
-		out, err := os.Create("posts/" + strings.ReplaceAll(strings.ToLower(entry.Title), " ", "-") + ".md")
+		out, err := os.Create("posts/" + sanitize(entry.Title) + ".md")
 		if err != nil {
 			log.Fatal("Failed to create file", err)
 		}
@@ -123,5 +136,5 @@ func main() {
 		}
 		fmt.Printf("%s %s %t\n", entry.Title, entry.Tags, entry.Draft)
 	}
-	
+
 }
